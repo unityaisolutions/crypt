@@ -1,5 +1,5 @@
 # Crypt
-Crypt is a 100% client-side, zero-dependency library for securely encrypting PDF documents and user signatures directly in the browser using the native WebCrypto API. It features automatic memory sanitization to ensure sensitive buffers are wiped out of scope.
+Crypt is a 100% client-side, zero-dependency library for securely encrypting and decrypting PDF documents and user signatures directly in the browser using the native WebCrypto API. It features automatic memory sanitization to ensure sensitive buffers are wiped out of scope.
 
 ## Installation
 You can install the library using your preferred package manager:
@@ -15,7 +15,7 @@ If you are not using a bundler, you can include the minified script directly in 
 <script src="path/to/dist/index.min.js"></script>
 ```
 
-## Example 1: Vanilla JavaScript
+## Example 1: Vanilla JavaScript (Encryption)
 Here is a basic implementation using standard HTML inputs and Vanilla JS. It demonstrates capturing the inputs, triggering the encryption, and downloading the resulting ```.crypt``` file.
 ```javascript
 <!-- index.html -->
@@ -61,72 +61,67 @@ Here is a basic implementation using standard HTML inputs and Vanilla JS. It dem
 ```
 
 ## Example 2: React Integration (Recommended)
-When using React, it's crucial to manage the ```objectUrl``` lifecycle to prevent memory leaks. Use the ```useEffect``` hook to ensure the ```.cleanup()``` method is called when the component unmounts or when a new file is processed.
+This example shows how to take an already encrypted ```.crypt``` file, supply the original passkey, and recover the PDF and signature securely.
 ```javascript
 import React, { useState, useEffect } from 'react';
-import { DocumentEncryptor, EncryptionResult } from 'pdf-crypto-browser';
+import { DocumentEncryptor, DecryptionResult } from '@unityaisolutions/crypt';
 
-export default function SecureDocumentUploader() {
+export default function SecureDocumentDecoder() {
   const [file, setFile] = useState<File | null>(null);
   const [passkey, setPasskey] = useState('');
-  const [signature, setSignature] = useState('');
-  const [encryptedData, setEncryptedData] = useState<EncryptionResult | null>(null);
+  const [decryptedData, setDecryptedData] = useState<DecryptionResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // CRUCIAL: Cleanup memory when component unmounts or new data is generated
   useEffect(() => {
     return () => {
-      if (encryptedData) {
-        encryptedData.cleanup();
+      if (decryptedData) {
+        decryptedData.cleanup();
       }
     };
-  }, [encryptedData]);
+  }, [decryptedData]);
 
-  const handleEncrypt = async (e: React.FormEvent) => {
+  const handleDecrypt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !passkey || !signature) return;
+    if (!file || !passkey) return;
 
     setIsProcessing(true);
     try {
-      // Clear previous payload if it exists
-      if (encryptedData) encryptedData.cleanup();
+      if (decryptedData) decryptedData.cleanup();
 
-      const result = await DocumentEncryptor.encryptPDF(file, passkey, signature);
-      setEncryptedData(result);
+      const result = await DocumentEncryptor.decryptPDF(file, passkey);
+      setDecryptedData(result);
+      setPasskey(''); // Clear passkey from state immediately for security
     } catch (error: any) {
-      alert(`Encryption failed: ${error.message}`);
+      alert(`Decryption failed: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleDownloadAndCleanup = () => {
-    if (!encryptedData) return;
+    if (!decryptedData) return;
     
-    // Trigger download
     const a = document.createElement('a');
-    a.href = encryptedData.objectUrl;
-    a.download = encryptedData.filename;
+    a.href = decryptedData.pdfUrl;
+    a.download = decryptedData.filename;
     a.click();
 
-    // Clean up immediately after download is initiated
-    encryptedData.cleanup();
-    setEncryptedData(null); // Reset state
+    decryptedData.cleanup();
+    setDecryptedData(null); 
     setFile(null);
-    setPasskey('');
-    setSignature('');
   };
 
   return (
     <div className="p-6 max-w-md mx-auto bg-white rounded-xl shadow-md space-y-4">
-      <h2 className="text-xl font-bold">Secure Document Encryption</h2>
+      <h2 className="text-xl font-bold">Secure Document Decryption</h2>
       
-      <form onSubmit={handleEncrypt} className="space-y-4">
+      <form onSubmit={handleDecrypt} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700">Select PDF</label>
+          <label className="block text-sm font-medium text-gray-700">Select .crypt File</label>
           <input 
             type="file" 
-            accept="application/pdf" 
+            accept=".crypt" 
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="mt-1 block w-full"
             required
@@ -144,35 +139,29 @@ export default function SecureDocumentUploader() {
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Signature</label>
-          <input 
-            type="text" 
-            value={signature}
-            onChange={(e) => setSignature(e.target.value)}
-            className="mt-1 block w-full border border-gray-300 rounded-md p-2"
-            required
-            placeholder="Type full name to sign"
-          />
-        </div>
-
         <button 
           type="submit" 
           disabled={isProcessing}
-          className="w-full bg-blue-600 text-white p-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
+          className="w-full bg-purple-600 text-white p-2 rounded-md hover:bg-purple-700 disabled:opacity-50"
         >
-          {isProcessing ? 'Encrypting...' : 'Encrypt Document'}
+          {isProcessing ? 'Decrypting...' : 'Decrypt Document'}
         </button>
       </form>
 
-      {encryptedData && (
-        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-md">
-          <p className="text-green-800 text-sm mb-3">Encryption successful!</p>
+      {decryptedData && (
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-md space-y-3">
+          <p className="text-green-800 text-sm font-medium">Decryption successful!</p>
+          
+          <div className="bg-white p-2 rounded border border-green-100">
+            <p className="text-xs text-gray-500">Recovered Signature:</p>
+            <p className="font-mono text-sm">{decryptedData.signature}</p>
+          </div>
+
           <button 
             onClick={handleDownloadAndCleanup}
             className="w-full bg-green-600 text-white p-2 rounded-md hover:bg-green-700"
           >
-            Download {encryptedData.filename}
+            Download {decryptedData.filename}
           </button>
         </div>
       )}
@@ -184,6 +173,7 @@ export default function SecureDocumentUploader() {
 ## API Reference
 ```DocumentEncryptor.encryptPDF(file, passkey, signature)```
 Encrypts a PDF file and a signature string using AES-GCM 256-bit encryption derived from the provided passkey.
+
 **Parameters:**
 - ```file``` (*File*): The standard HTML File object. **Must** have a MIME type of ```application/pdf```.
 - ```passkey``` (*string*): A user-generated string used to derive the cryptographic key via PBKDF2.
@@ -207,7 +197,32 @@ interface EncryptionResult {
   cleanup: () => void;
 }
 ```
+```DocumentEncryptor.decryptPDF(file, passkey)```
+Decrypts a ```.crypt``` file back into its original PDF and extracts the embedded signature string.
 
-Security Considerations
+**Parameters:**
+- ```file``` (*File*): The .crypt JSON file generated by the encryptor.
+- ```passkey``` (*string*): The original string used to encrypt the document. If incorrect, the function will throw a decryption error.
+**Returns:**
+A ```Promise``` resolving to a ```DecryptionResult``` object:
+```
+interface DecryptionResult {
+  /** The temporary URL pointing to the decrypted PDF in browser memory. */
+  pdfUrl: string;
+  
+  /** The raw decrypted PDF Blob. */
+  pdfBlob: Blob;
+  
+  /** The recovered signature string or Base64 image data. */
+  signature: string;
+  
+  /** The suggested filename, formatted back to "OriginalName.pdf" */
+  filename: string;
+  
+  /** * CRUCIAL METHOD. Severs the Object URL and wipes temporary session memory. */
+  cleanup: () => void;
+}
+```
+**Security Considerations**
 1. Never skip ```cleanup()```: Browser ObjectURLs (blob:http://...) remain in memory until the document unloads. Failing to call ```cleanup()``` retains the decrypted file in memory longer than necessary.
 2. Passkeys are volatile: The library intentionally drops the passkey and derived WebCrypto keys out of scope and overwrites their typed arrays with zeroes (```crypto.getRandomValues```). You should ensure your UI framework (like React state) clears the passkey variable from the input field after usage if high security is required.
