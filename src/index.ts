@@ -5,6 +5,14 @@ export interface EncryptionResult {
     cleanup: () => void;
   }
   
+  export interface DecryptionResult {
+    pdfUrl: string;
+    pdfBlob: Blob;
+    signature: string;
+    filename: string;
+    cleanup: () => void;
+  }
+  
   export class DocumentEncryptor {
     /**
      * Helper function to convert an ArrayBuffer to a Base64 string robustly.
@@ -32,6 +40,19 @@ export interface EncryptionResult {
         binary += String.fromCharCode(uint8[i]);
       }
       return btoa(binary);
+    }
+  
+    /**
+     * Helper function to convert a Base64 string back to a Uint8Array.
+     */
+    private static base64ToUint8Array(base64: string): Uint8Array {
+      const binaryString = atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
     }
   
     /**
@@ -148,6 +169,113 @@ export interface EncryptionResult {
         this.wipeMemory(pdfView);
         this.wipeMemory(passkeyArr);
         this.wipeMemory(signatureArr);
+      }
+    }
+  
+    /**
+     * Decrypts a .crypt file back into a PDF and retrieves the original signature.
+     */
+    public static async decryptPDF(
+      file: File,
+      passkey: string
+    ): Promise<DecryptionResult> {
+      if (!file.name.endsWith('.crypt')) {
+        throw new Error("Invalid file type. Only .crypt files are supported.");
+      }
+  
+      const fileText = await file.text();
+      let payload;
+      try {
+        payload = JSON.parse(fileText);
+      } catch (e) {
+        throw new Error("Invalid file format. Could not parse payload.");
+      }
+  
+      const { encryptedFile, encryptedSignature, salt, iv } = payload;
+      if (!encryptedFile || !encryptedSignature || !salt || !iv) {
+        throw new Error("Invalid payload structure. Missing required cryptographic fields.");
+      }
+  
+      const saltArr = this.base64ToUint8Array(salt);
+      const ivArr = this.base64ToUint8Array(iv);
+      const encryptedPdfArr = this.base64ToUint8Array(encryptedFile);
+      const encryptedSigArr = this.base64ToUint8Array(encryptedSignature);
+  
+      const encoder = new TextEncoder();
+      const passkeyArr = encoder.encode(passkey);
+  
+      let decryptedPdfBuffer: ArrayBuffer | null = null;
+      let decryptedSigBuffer: ArrayBuffer | null = null;
+  
+      try {
+        // 1. Key Derivation (Rebuilding the key from the passkey and extracted salt)
+        const keyMaterial = await crypto.subtle.importKey(
+          "raw",
+          passkeyArr,
+          { name: "PBKDF2" },
+          false,
+          ["deriveKey"]
+        );
+  
+        const cryptoKey = await crypto.subtle.deriveKey(
+          {
+            name: "PBKDF2",
+            salt: saltArr as any,
+            iterations: 100000,
+            hash: "SHA-256",
+          },
+          keyMaterial,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["decrypt"]
+        );
+  
+        // 2. Decryption
+        try {
+          decryptedPdfBuffer = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: ivArr as any },
+            cryptoKey,
+            encryptedPdfArr as any
+          );
+  
+          decryptedSigBuffer = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: ivArr as any },
+            cryptoKey,
+            encryptedSigArr as any
+          );
+        } catch (e) {
+          throw new Error("Decryption failed. Incorrect passkey or corrupted file.");
+        }
+  
+        // 3. Reconstruct Original Data
+        const decoder = new TextDecoder();
+        const decryptedSignature = decoder.decode(decryptedSigBuffer);
+  
+        const pdfBlob = new Blob([decryptedPdfBuffer], { type: "application/pdf" });
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const originalName = file.name.replace(".crypt", ".pdf");
+  
+        const cleanup = () => {
+          URL.revokeObjectURL(pdfUrl);
+          sessionStorage.removeItem("temp_pdf_crypto_state");
+        };
+  
+        return {
+          pdfUrl,
+          pdfBlob,
+          signature: decryptedSignature,
+          filename: originalName,
+          cleanup,
+        };
+      } finally {
+        // 4. Secure Memory Sanitization
+        this.wipeMemory(passkeyArr);
+        this.wipeMemory(saltArr);
+        this.wipeMemory(ivArr);
+        this.wipeMemory(encryptedPdfArr);
+        this.wipeMemory(encryptedSigArr);
+        if (decryptedPdfBuffer) this.wipeMemory(new Uint8Array(decryptedPdfBuffer));
+        if (decryptedSigBuffer) this.wipeMemory(new Uint8Array(decryptedSigBuffer));
       }
     }
   }
