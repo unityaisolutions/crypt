@@ -1,0 +1,28 @@
+{
+  "name": "@unityaisolutions/crypt",
+  "version": "1.0.1",
+  "description": "Browser-based PDF encryption leveraging the WebCrypto API with automated sanitization.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "browser": "./dist/index.min.js",
+  "scripts": {
+    "build": "tsc && bun run build.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "keywords": [
+    "pdf",
+    "encryption",
+    "webcrypto",
+    "browser",
+    "security"
+  ],
+  "author": "",
+  "license": "MIT"
+}
